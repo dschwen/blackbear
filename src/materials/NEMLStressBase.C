@@ -16,6 +16,7 @@
 
 #include "NEMLStressBase.h"
 #include "Conversion.h"
+#include "RankTwoScalarTools.h"
 
 #include <limits>
 #include <type_traits>
@@ -26,6 +27,7 @@ NEMLStressBase::validParams()
   InputParameters params = ComputeStressBase::validParams();
   params.addCoupledVar("temperature", 0.0, "Coupled temperature");
   params.addParam<Real>("target_increment",
+                        1e-3,
                         "L2 norm of the inelastic strain increment to target by adjusting the "
                         "timestep");
   params.addParam<bool>("debug",
@@ -49,12 +51,11 @@ NEMLStressBase::NEMLStressBase(const InputParameters & parameters)
     _temperature(coupledValue("temperature")),
     _temperature_old(coupledValueOld("temperature")),
     _inelastic_strain(declareProperty<RankTwoTensor>(_base_name + "inelastic_strain")),
-    _compute_dt(isParamValid("target_increment")),
-    _target_increment(_compute_dt ? getParam<Real>("target_increment") : 0.0),
-    _inelastic_strain_old(
-        _compute_dt ? &getMaterialPropertyOld<RankTwoTensor>(_base_name + "inelastic_strain")
-                    : nullptr),
-    _material_dt(_compute_dt ? &declareProperty<Real>("material_timestep_limit") : nullptr),
+    _target_increment(getParam<Real>("target_increment")),
+    _inelastic_strain_old(getMaterialPropertyOld<RankTwoTensor>(_base_name + "inelastic_strain")),
+    _effective_inelastic_strain(declareProperty<Real>("effective_inelastic_strain")),
+    _effective_inelastic_strain_old(getMaterialPropertyOld<Real>("effective_inelastic_strain")),
+    _material_dt(declareProperty<Real>("material_timestep_limit")),
     _debug(getParam<bool>("debug"))
 {
   // We're letting NEML write to raw pointers. Best make sure the stored types are
@@ -170,13 +171,17 @@ NEMLStressBase::computeQpStress()
 
   nemlToRankTwoTensor(pstrain, _inelastic_strain[_qp]);
 
+  // compute effective inelastic strain increment
+  const auto inelastic_strain_increment = _inelastic_strain[_qp] - _inelastic_strain_old[_qp];
+  const auto effective_inelastic_strain_increment =
+      RankTwoScalarTools::effectiveStrain(inelastic_strain_increment);
+  _effective_inelastic_strain[_qp] =
+      _effective_inelastic_strain_old[_qp] + effective_inelastic_strain_increment;
+
   // compute material timestep
-  if (_compute_dt)
-  {
-    const auto increment = (_inelastic_strain[_qp] - (*_inelastic_strain_old)[_qp]).L2norm();
-    (*_material_dt)[_qp] =
-        increment > 0 ? _dt * _target_increment / increment : std::numeric_limits<Real>::max();
-  }
+  _material_dt[_qp] = effective_inelastic_strain_increment > 0
+                          ? _dt * _target_increment / effective_inelastic_strain_increment
+                          : std::numeric_limits<Real>::max();
 
   // Store dissipation
   _energy[_qp] = u_np1;

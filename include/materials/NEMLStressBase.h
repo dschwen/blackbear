@@ -66,10 +66,11 @@ protected:
   MaterialProperty<RankTwoTensor> & _inelastic_strain;
 
   ///@{ Computation of a material based time step limit
-  const bool _compute_dt;
   const Real _target_increment;
-  const MaterialProperty<RankTwoTensor> * _inelastic_strain_old;
-  MaterialProperty<Real> * _material_dt;
+  const MaterialProperty<RankTwoTensor> & _inelastic_strain_old;
+  MaterialProperty<Real> & _effective_inelastic_strain;
+  const MaterialProperty<Real> & _effective_inelastic_strain_old;
+  MaterialProperty<Real> & _material_dt;
   ///@}
 
   /// Print debugging data on failed NEML stress updates
